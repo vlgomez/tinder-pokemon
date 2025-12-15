@@ -1,0 +1,8 @@
+﻿node_modules/
+**/node_modules/
+.expo/
+.expo-shared/
+.env
+**/.env
+token_*.txt
+*.log
