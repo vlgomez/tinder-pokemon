@@ -52,6 +52,12 @@ router.get("/candidates", auth, async (req, res) => {
 
     const candidatesMap = new Map();
 
+    const asPlainCard = (r, extra = {}) => {
+      if (!r.Card) return null;
+      const base = r.Card.toJSON ? r.Card.toJSON() : { ...r.Card };
+      return { ...base, ...extra };
+    };
+
     // ============================================================
     // A) Ellos TIENEN algo que YO BUSCO
     // ============================================================
@@ -87,8 +93,9 @@ router.get("/candidates", auth, async (req, res) => {
           });
         }
 
-        if (r.Card) {
-          candidatesMap.get(u.id).theyHaveINeed.push(r.Card);
+        const card = asPlainCard(r, { photoUrl: r.photoUrl, userCardId: r.id });
+        if (card) {
+          candidatesMap.get(u.id).theyHaveINeed.push(card);
         }
       }
     }
@@ -127,8 +134,9 @@ router.get("/candidates", auth, async (req, res) => {
           });
         }
 
-        if (r.Card) {
-          candidatesMap.get(u.id).theyNeedIHave.push(r.Card);
+        const card = asPlainCard(r);
+        if (card) {
+          candidatesMap.get(u.id).theyNeedIHave.push(card);
         }
       }
     }
@@ -138,7 +146,11 @@ router.get("/candidates", auth, async (req, res) => {
     // ============================================================
     const dedupeById = (arr) => {
       const map = new Map();
-      for (const c of arr) map.set(c.id, c);
+      for (const c of arr) {
+        const existing = map.get(c.id);
+        const shouldReplace = !existing || (!!c.photoUrl && !existing.photoUrl);
+        if (shouldReplace) map.set(c.id, c);
+      }
       return [...map.values()];
     };
 

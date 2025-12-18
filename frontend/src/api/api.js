@@ -1,11 +1,17 @@
 import axios from "axios";
+import Constants from "expo-constants";
 import { getToken } from "../utils/storage";
 
-// 🔴 IMPORTANTE: ajusta según dónde ejecutes la app
-// Android emulator → http://10.0.2.2:3000
-// iOS simulator → http://localhost:3000
-// Móvil físico → http://TU_IP_LOCAL:3000
-const BASE_URL = "http://192.168.1.36:3000";
+// Detecta el host del bundle de Expo (LAN/WiFi) para Expo Go.
+const hostFromExpo = () => {
+  const hostUri = Constants.expoConfig?.hostUri; // ej: "192.168.1.10:8081"
+  if (!hostUri) return null;
+  const host = hostUri.split(":")[0];
+  return `http://${host}:3000`;
+};
+
+// Prioriza env, luego detección automática, luego localhost.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL || hostFromExpo() || "http://localhost:3000";
 
 export const api = axios.create({
   baseURL: BASE_URL,
