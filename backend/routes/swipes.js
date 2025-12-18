@@ -21,6 +21,9 @@ router.get("/candidates", auth, async (req, res) => {
   try {
     const me = req.user.id;
     const limit = Math.min(Number(req.query.limit) || 10, 30);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    // include_swiped=true -> include users you've already swiped; default true to preserve current behavior
+    const includeSwiped = req.query.include_swiped === undefined ? true : String(req.query.include_swiped) === 'true';
 
     // 1️⃣ Usuarios a los que ya he swipeado
     const mySwipes = await Swipe.findAll({
@@ -43,12 +46,9 @@ router.get("/candidates", auth, async (req, res) => {
     });
     const myWantedCardIds = [...new Set(myWishlist.map((w) => w.CardId))];
 
-    if (myOwnedCardIds.length === 0 && myWantedCardIds.length === 0) {
-      return res.json({
-        candidates: [],
-        reason: "Añade cartas en 'Mis cartas' o en 'Busco' para ver candidatos.",
-      });
-    }
+    // Mostrar a todos los usuarios aunque no tengan cartas o wishlist.
+    // (Antes devolvíamos [] si no tenías cartas ni wishlist; ahora incluimos a todos)
+    // No hacemos return aquí; seguimos construyendo candidatos a partir de todos los usuarios.
 
     const candidatesMap = new Map();
 
@@ -65,7 +65,7 @@ router.get("/candidates", auth, async (req, res) => {
       const rows = await UserCard.findAll({
         where: {
           CardId: { [Op.in]: myWantedCardIds },
-          UserId: { [Op.ne]: me, [Op.notIn]: swipedUserIds },
+          UserId: includeSwiped ? { [Op.ne]: me } : { [Op.ne]: me, [Op.notIn]: swipedUserIds },
           isForTrade: true,
         },
         include: [{ model: Card }],
@@ -107,7 +107,7 @@ router.get("/candidates", auth, async (req, res) => {
       const rows = await Wishlist.findAll({
         where: {
           CardId: { [Op.in]: myOwnedCardIds },
-          UserId: { [Op.ne]: me, [Op.notIn]: swipedUserIds },
+          UserId: includeSwiped ? { [Op.ne]: me } : { [Op.ne]: me, [Op.notIn]: swipedUserIds },
         },
         include: [{ model: Card }],
         limit: 200,
@@ -142,6 +142,26 @@ router.get("/candidates", auth, async (req, res) => {
     }
 
     // ============================================================
+    // 3.5) Asegurarnos de incluir a todos los usuarios (incluso si no tienen cards/wishlist)
+    // ============================================================
+    // Optionally exclude users that I've already swiped depending on includeSwiped flag
+    const allUsersWhere = includeSwiped ? { id: { [Op.ne]: me } } : { id: { [Op.ne]: me, [Op.notIn]: swipedUserIds } };
+    const allUsers = await User.findAll({
+      where: allUsersWhere,
+      attributes: ["id", "username", "city"],
+    });
+
+    for (const u of allUsers) {
+      if (!candidatesMap.has(u.id)) {
+        candidatesMap.set(u.id, {
+          user: u,
+          theyHaveINeed: [],
+          theyNeedIHave: [],
+        });
+      }
+    }
+
+    // ============================================================
     // 4️⃣ Limpiar duplicados + score
     // ============================================================
     const dedupeById = (arr) => {
@@ -163,7 +183,11 @@ router.get("/candidates", auth, async (req, res) => {
 
     candidates.sort((a, b) => b.score - a.score);
 
-    res.json({ candidates: candidates.slice(0, limit) });
+    // Support offset pagination, and include total for the UI
+    const total = candidates.length;
+    const paged = candidates.slice(offset, offset + limit);
+
+    res.json({ candidates: paged, total, offset });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error al generar candidatos" });

@@ -7,17 +7,27 @@ console.log("DB_PASS length =", (process.env.DB_PASS || "").length);
 console.log("DB_NAME =", process.env.DB_NAME);
 
 
-const sequelize = new Sequelize(
-  process.env.DB_NAME,
-  process.env.DB_USER,
-  process.env.DB_PASS,
-  {
-    host: process.env.DB_HOST || "localhost",
-    port: Number(process.env.DB_PORT || 3306),
-    dialect: "mysql",
+// Allow configuring the DB dialect for tests (sqlite) via env vars
+let sequelize;
+if (process.env.DB_DIALECT === 'sqlite' || process.env.NODE_ENV === 'test') {
+  sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: process.env.DB_STORAGE || ':memory:',
     logging: false,
-  }
-);
+  });
+} else {
+  sequelize = new Sequelize(
+    process.env.DB_NAME,
+    process.env.DB_USER,
+    process.env.DB_PASS,
+    {
+      host: process.env.DB_HOST || "localhost",
+      port: Number(process.env.DB_PORT || 3306),
+      dialect: "mysql",
+      logging: false,
+    }
+  );
+}
 
 // Objeto contenedor de modelos (en tu proyecto se exporta esto)
 const models = {};

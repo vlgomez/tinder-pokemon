@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { View, Text, StyleSheet, Dimensions, Image, ScrollView } from "react-native";
 import Animated, {
   useSharedValue,
@@ -23,12 +23,13 @@ const { width } = Dimensions.get("window");
 const SWIPE_THRESHOLD = width * 0.25;
 const OFFSCREEN_X = width * 1.2;
 
-export default function SwipeCard({
+function SwipeCard({
   candidate,
   onSwipeLeft,
   onSwipeRight,
   disabled,
-}) {
+}, ref) {
+  const isTest = process.env.NODE_ENV === 'test';
   const [fallbackMap, setFallbackMap] = useState({});
   const user = candidate?.user || {};
   const primaryCards = (candidate?.theyHaveINeed || []).slice(0, 3);
@@ -93,6 +94,30 @@ export default function SwipeCard({
       translateX.value = withSpring(0, { damping: 14, stiffness: 120 });
     });
 
+  // Exponer métodos para disparar swipes desde fuera (botones)
+  useImperativeHandle(ref, () => ({
+    swipeLeft: () => {
+      if (disabled || isGone.value) return;
+      isGone.value = true;
+      translateX.value = withTiming(-OFFSCREEN_X, { duration: 180 }, () => {
+        runOnJS(onSwipeLeft)();
+        translateX.value = 0;
+        isGone.value = false;
+      });
+      if (isTest && onSwipeLeft) onSwipeLeft();
+    },
+    swipeRight: () => {
+      if (disabled || isGone.value) return;
+      isGone.value = true;
+      translateX.value = withTiming(OFFSCREEN_X, { duration: 180 }, () => {
+        runOnJS(onSwipeRight)();
+        translateX.value = 0;
+        isGone.value = false;
+      });
+      if (isTest && onSwipeRight) onSwipeRight();
+    },
+  }));
+
   const cardStyle = useAnimatedStyle(() => {
     const rotate = `${translateX.value / 18}deg`;
     return {
@@ -131,8 +156,8 @@ export default function SwipeCard({
           </View>
 
           <View style={styles.scoreBadge}>
-            <Text style={styles.scoreLabel}>Afinidad</Text>
-            <Text style={styles.scoreValue}>{candidate?.score || 0}</Text>
+            <Text style={styles.scoreLabel}>{candidate?.score ? "Afinidad" : "—"}</Text>
+            <Text style={styles.scoreValue}>{candidate?.score ? candidate.score : "-"}</Text>
           </View>
         </View>
 
@@ -329,3 +354,5 @@ const styles = StyleSheet.create({
   },
   emptyPhotoText: { color: "#94a3b8", fontWeight: "700" },
 });
+
+export default forwardRef(SwipeCard);

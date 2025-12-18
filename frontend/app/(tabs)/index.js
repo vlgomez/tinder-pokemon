@@ -1,9 +1,10 @@
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Text, Alert, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, Alert, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../../src/api/api";
 import SwipeCard from "../../src/components/SwipeCard";
+import LoadingMoreIndicator from "../../src/components/LoadingMoreIndicator";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -13,12 +14,23 @@ export default function Swipes() {
   const [idx, setIdx] = useState(0);
   const [busy, setBusy] = useState(false);
   const [matchOverlay, setMatchOverlay] = useState({ visible: false, other: null });
+  const cardRef = useRef(null);
 
-  async function load() {
+  const [total, setTotal] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [includeSwiped, setIncludeSwiped] = useState(true); // true = include already-swiped users (default)
+
+  async function load(offset = 0, useIncludeSwiped = includeSwiped) {
     try {
-      const res = await api.get("/swipes/candidates?limit=10");
-      setCandidates(res.data.candidates || []);
-      setIdx(0);
+      const res = await api.get(`/swipes/candidates?limit=10&offset=${offset}&include_swiped=${useIncludeSwiped}`);
+      const newCandidates = res.data.candidates || [];
+      if (offset > 0) {
+        setCandidates((prev) => [...prev, ...newCandidates]);
+      } else {
+        setCandidates(newCandidates);
+        setIdx(0);
+      }
+      setTotal(typeof res.data.total === 'number' ? res.data.total : null);
     } catch (e) {
       Alert.alert("Error", e?.response?.data?.error || "No se pudieron cargar candidatos");
     }
@@ -30,6 +42,20 @@ export default function Swipes() {
 
   const current = candidates[idx];
   const next = candidates[idx + 1];
+
+  // When we are near the end of the deck, prefetch more candidates
+  useEffect(() => {
+    if (!current) return;
+    if (loadingMore) return;
+    // don't prefetch on initial mount; wait until user has swiped at least once
+    if (idx === 0) return;
+    const remaining = candidates.length - 1 - idx;
+    if (remaining <= 2 && (total === null || candidates.length < total)) {
+      // fetch next page
+      setLoadingMore(true);
+      load(candidates.length).finally(() => setLoadingMore(false));
+    }
+  }, [idx, candidates, current, total, loadingMore]);
 
   async function swipeRight() {
     if (!current || busy) return;
@@ -71,9 +97,7 @@ export default function Swipes() {
         <View style={styles.emptyBox}>
           <Ionicons name="telescope" size={32} color="#94a3b8" />
           <Text style={styles.emptyTitle}>No hay candidatos disponibles</Text>
-          <Text style={styles.emptyCopy}>
-            Añade cartas en "Mis cartas" o en "Busco" y prueba recargar más tarde.
-          </Text>
+          <Text style={styles.emptyCopy}>No hay usuarios disponibles por ahora. Prueba recargar.</Text>
           <TouchableOpacity style={styles.pillButton} onPress={load}>
             <Ionicons name="refresh" size={16} color="#e0e7ff" />
             <Text style={styles.pillButtonText}>Recargar</Text>
@@ -88,14 +112,27 @@ export default function Swipes() {
       <View style={styles.hero}>
         <View>
           <Text style={styles.title}>Descubrir</Text>
-          <Text style={styles.subtitle}>Intercambios afinados a tus cartas</Text>
+          <Text style={styles.subtitle}>Para ti · Todos los usuarios</Text>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.pillButton} onPress={() => router.push("/wishlist")}>
             <Ionicons name="bookmark" size={16} color="#e0e7ff" />
             <Text style={styles.pillButtonText}>Busco</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.pillButton} onPress={load}>
+
+          <TouchableOpacity
+            testID="toggle-include-swiped"
+            style={[styles.pillButton, { borderColor: includeSwiped ? '#0ea5a4' : '#1e293b' }]}
+            onPress={() => {
+              const nv = !includeSwiped;
+              setIncludeSwiped(nv);
+              load(0, nv);
+            }}
+          >
+            <Text style={styles.pillButtonText}>{includeSwiped ? 'Incluye vistos' : 'No incluir vistos'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.pillButton} onPress={() => load(0)}>
             <Ionicons name="refresh" size={16} color="#e0e7ff" />
             <Text style={styles.pillButtonText}>Recargar</Text>
           </TouchableOpacity>
@@ -104,8 +141,9 @@ export default function Swipes() {
 
       <View style={styles.deckMeta}>
         <Text style={styles.metaText}>
-          {candidates.length} candidatos · priorizados por afinidad
+          {candidates.length} usuarios · mostrando a todos
         </Text>
+        <LoadingMoreIndicator visible={loadingMore} />
       </View>
 
       <View style={styles.stack}>
@@ -116,6 +154,7 @@ export default function Swipes() {
         ) : null}
 
         <SwipeCard
+          ref={cardRef}
           candidate={current}
           onSwipeLeft={swipeLeft}
           onSwipeRight={swipeRight}
@@ -124,17 +163,28 @@ export default function Swipes() {
       </View>
 
       <View style={styles.actionsRow}>
-        <TouchableOpacity style={[styles.actionBtn, styles.dislikeBtn]} onPress={swipeLeft} disabled={busy}>
+        <TouchableOpacity
+          testID="dislike-button"
+          style={[styles.actionBtn, styles.dislikeBtn]}
+          onPress={() => (cardRef.current && cardRef.current.swipeLeft ? cardRef.current.swipeLeft() : swipeLeft())}
+          disabled={busy}
+        >
           <Ionicons name="close" size={28} color="#ef4444" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.actionBtn, styles.likeBtn]} onPress={swipeRight} disabled={busy}>
+        <TouchableOpacity
+          testID="like-button"
+          style={[styles.actionBtn, styles.likeBtn]}
+          onPress={() => (cardRef.current && cardRef.current.swipeRight ? cardRef.current.swipeRight() : swipeRight())}
+          disabled={busy}
+        >
           <Ionicons name="heart" size={30} color="#fff" />
         </TouchableOpacity>
 
         <TouchableOpacity
+          testID="superlike-button"
           style={[styles.actionBtn, styles.superlikeBtn]}
-          onPress={async () => { await swipeRight(); }}
+          onPress={() => (cardRef.current && cardRef.current.swipeRight ? cardRef.current.swipeRight() : swipeRight())}
           disabled={busy}
         >
           <Ionicons name="star" size={26} color="#4f46e5" />
@@ -201,6 +251,8 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", gap: 8 },
   deckMeta: { marginBottom: 12 },
   metaText: { color: "#94a3b8", fontWeight: "700" },
+  loadingMore: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  loadingMoreText: { color: '#94a3b8', marginLeft: 8 },
   emptyBox: {
     backgroundColor: "#0f172a",
     borderRadius: 16,
